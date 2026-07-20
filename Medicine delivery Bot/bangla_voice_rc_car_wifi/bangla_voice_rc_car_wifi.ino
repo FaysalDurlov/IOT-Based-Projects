@@ -54,8 +54,8 @@
 #include <ESPmDNS.h>
 
 // ---------------- WiFi settings ----------------
-const char* WIFI_SSID     = "YOUR_WIFI_NAME";
-const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
+const char* WIFI_SSID     = "Mozahar2";
+const char* WIFI_PASSWORD = "mozahar3118";
 
 // mDNS hostname — lets you optionally use http://banglarc.local/ instead
 // of typing the IP. Works on many phones, but not guaranteed on all
@@ -91,6 +91,7 @@ const char* MDNS_NAME = "banglarc";
 
 // ---------------- Objects ----------------
 Adafruit_SSD1306 display(128, 64, &Wire, -1);
+bool bmpOK = false; 
 Adafruit_BMP085 bmp;
 DHT dht(DHT_PIN, DHT_TYPE);
 Servo lidServo;
@@ -182,7 +183,7 @@ void updateDisplay() {
   display.print("Temp: "); display.print(temperature, 1); display.println("C");
   display.print("Cmd: ");  display.println(lastCmdShown);
   if (wifiConnected) {
-    display.print("IP: "); display.println(WiFi.localIP());
+    display.println(WiFi.localIP().toString());
   } else {
     display.println("WiFi: connecting...");
   }
@@ -270,67 +271,100 @@ void handleNotFound() {
 // ---------------- Setup ----------------
 void setup() {
   Serial.begin(115200);
+  delay(1000);
 
+  Serial.println("==========================");
+  Serial.println("SETUP STARTED");
+  Serial.println("==========================");
+
+  Serial.println("1");
   pinMode(L_RPWM, OUTPUT); pinMode(L_LPWM, OUTPUT); pinMode(L_EN, OUTPUT);
   pinMode(R_RPWM, OUTPUT); pinMode(R_LPWM, OUTPUT); pinMode(R_EN, OUTPUT);
+
+  Serial.println("2");
+  pinMode(L_EN, OUTPUT);
+  pinMode(R_EN, OUTPUT);
+
   digitalWrite(L_EN, HIGH);
   digitalWrite(R_EN, HIGH);
 
+  analogWrite(L_RPWM, 0);
+  analogWrite(L_LPWM, 0);
+  analogWrite(R_RPWM, 0);
+  analogWrite(R_LPWM, 0);
+
+  Serial.println("3");
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
 
+  Serial.println("4");
   Wire.begin(I2C_SDA, I2C_SCL);
-  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+
+  Serial.println("5");
+  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)){
+    Serial.println("OLED FAILED");
+    while(true);
+  }
+  Serial.println("OLED OK");
+
   display.clearDisplay();
   display.display();
 
-  bmp.begin();
+  Serial.println("6");
+  bmpOK = bmp.begin();
+
+  if (bmpOK) {
+    Serial.println("BMP OK");
+  } else {
+    Serial.println("BMP FAILED");
+  }
+
+  Serial.println("7");
   dht.begin();
 
-  lidServo.setPeriodHertz(50);
-  lidServo.attach(SERVO_PIN, 500, 2400);
+  Serial.println("8");
+  // lidServo.setPeriodHertz(50);
+  // lidServo.attach(SERVO_PIN, 500, 2400);
+
+  Serial.println("9");
   closeLid();
 
+  Serial.println("10");
   SPI.begin(RFID_SCK, RFID_MISO, RFID_MOSI, RFID_SS);
+
+  Serial.println("11");
   rfid.PCD_Init();
 
-  // ---- WiFi connect ----
+  Serial.println("12");
   WiFi.mode(WIFI_STA);
+
+  Serial.println("13");
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  Serial.print("Connecting to WiFi");
-  unsigned long wifiStart = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - wifiStart < 20000) {
-    delay(400);
+
+  Serial.println("14");
+  Serial.println("Connecting to WiFi");
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
     Serial.print(".");
   }
 
-  if (WiFi.status() == WL_CONNECTED) {
-    wifiConnected = true;
-    Serial.println();
-    Serial.print("WiFi connected. IP address: ");
-    Serial.println(WiFi.localIP());
-
-    if (MDNS.begin(MDNS_NAME)) {
-      Serial.print("mDNS started: http://");
-      Serial.print(MDNS_NAME);
-      Serial.println(".local/  (may not resolve on all phones — use the IP above if it fails)");
-    }
-  } else {
-    Serial.println();
-    Serial.println("WiFi FAILED to connect within 20s. Check SSID/password and retry (device will keep retrying in background).");
-  }
+  Serial.println();
+  Serial.println("15");
+  Serial.print("IP: ");
+  Serial.println(WiFi.localIP());
 
   server.on("/", handleRoot);
   server.on("/cmd", handleCmdRequest);
-  server.onNotFound(handleNotFound);
   server.begin();
-  Serial.println("HTTP server started on port 80.");
 
-  updateDisplay();
+  Serial.println("16");
 }
 
 // ---------------- Loop ----------------
 void loop() {
+  Serial.println("Loop started");
+  delay(1000);
   server.handleClient();
 
   // Keep wifiConnected flag accurate + auto-retry if the connection drops
@@ -369,7 +403,11 @@ void loop() {
     lastSensorRead = millis();
     distanceCm = readDistanceCm();
     temperature = dht.readTemperature();
-    pressure = bmp.readPressure();
+    if (bmpOK) {
+      pressure = bmp.readPressure();
+    } else {
+      pressure = 0;
+    }
     updateDisplay();
   }
 

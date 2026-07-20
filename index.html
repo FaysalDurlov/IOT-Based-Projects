@@ -3,174 +3,354 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Bangla RC Car Control (WiFi)</title>
+<title>Bangla AI RC Car Control</title>
 <style>
   body { font-family: sans-serif; text-align: center; background:#111; color:#eee; padding: 20px; }
-  button { font-size: 18px; padding: 14px 22px; margin: 8px; border-radius: 10px; border:none; }
+  button { font-size: 18px; padding: 14px 22px; margin: 8px; border-radius: 10px; border:none; cursor:pointer; }
   #connectBtn { background:#2563eb; color:white; }
   #micBtn { background:#16a34a; color:white; }
   #micBtn.listening { background:#dc2626; }
-  input#ipInput { font-size: 16px; padding: 10px; border-radius: 8px; border: none; width: 200px; text-align:center; }
+  #sendBtn { background:#7c3aed; color:white; }
+  input[type=text], input[type=password] {
+    font-size: 15px; padding: 10px; border-radius: 8px; border: none; text-align:center;
+  }
+  #ipInput { width: 180px; }
+  #apiKeyInput { width: 260px; }
+  #textInput { width: 220px; }
+  .settings { margin-bottom: 10px; }
   #log { text-align:left; max-width:480px; margin:20px auto; background:#1e1e1e; padding:10px;
-         border-radius:8px; height:260px; overflow-y:auto; font-size:14px; }
+         border-radius:8px; height:300px; overflow-y:auto; font-size:14px; }
   .you { color:#7dd3fc; }
   .car { color:#86efac; }
+  .ai  { color:#fbbf24; }
   .err { color:#f87171; }
   #status { margin-top:10px; font-size:14px; color:#aaa; }
+  small { color:#888; display:block; margin-top:4px; }
 </style>
 </head>
 <body>
-  <h2>বাংলা RC কার কন্ট্রোল (WiFi)</h2>
+  <h2>বাংলা AI RC কার কন্ট্রোল</h2>
 
-  <div>
+  <div class="settings">
     <input type="text" id="ipInput" placeholder="গাড়ির IP, যেমন 192.168.1.42">
     <button id="connectBtn">সংযোগ পরীক্ষা করুন</button>
   </div>
+  <div class="settings">
+    <input type="password" id="apiKeyInput" placeholder="Google AI Studio (Gemini) API key">
+    <button id="saveKeyBtn">সেভ করুন</button>
+    <small>key শুধু আপনার ফোনে সেভ থাকে, কোথাও পাঠানো হয় না (Google API ছাড়া)</small>
+  </div>
+
   <br>
   <button id="micBtn" disabled>🎤 বলুন</button>
+  <br>
+  <input type="text" id="textInput" placeholder="অথবা এখানে টাইপ করুন..." disabled>
+  <button id="sendBtn" disabled>পাঠান</button>
+
   <div id="status">সংযোগ নেই</div>
   <div id="log"></div>
 
 <script>
 /*
-  Requires the phone/computer and the ESP32 to be on the SAME WiFi
-  network. Find the car's IP from the Serial Monitor (printed after it
-  connects to WiFi) or from the OLED screen, then type it into the box
-  above. No Bluetooth, no HTTPS required — works from any modern
-  browser including iOS Safari.
+  Two separate connections here:
+   1) LOCAL WiFi -> your ESP32 car (http://<car-ip>/cmd, /rfid_status)
+   2) INTERNET -> Google AI Studio's Gemini API (needs your phone/PC to
+      have internet access, not just the car's local WiFi — if your
+      car's WiFi network has no internet, use your phone's normal WiFi
+      or mobile data as long as it can still reach the car's IP on the
+      same LAN, or keep the car on your home WiFi which usually has
+      internet anyway).
+
+  FLOW:
+   - You speak (or type) in Bangla.
+   - That text + the running conversation goes to Gemini, along with a
+     system prompt describing what the car can do.
+   - Gemini replies with a short Bangla sentence AND a decision on
+     whether to execute one specific action (or "কিছুই না" / none, if
+     it wants to ask something first).
+   - If there's an action, we call the ESP32's /cmd endpoint. The
+     ESP32's own reply is spoken too, so you hear real confirmation
+     from the car, not just the AI guessing.
+   - Separately, we poll /rfid_status every couple of seconds. When you
+     tap a card, the car flags it and the phone says "ধন্যবাদ".
 */
 
-const STORAGE_KEY = 'banglarc_ip';
-let carIp = localStorage.getItem(STORAGE_KEY) || '';
+const IP_KEY  = 'banglarc_ip';
+const API_KEY = 'banglarc_gemini_key';
+const GEMINI_MODEL = 'gemini-2.5-flash';
+
+let carIp = localStorage.getItem(IP_KEY) || '';
+let apiKey = localStorage.getItem(API_KEY) || '';
 let recognizing = false;
+let rfidPollTimer = null;
 
 const ipInput = document.getElementById('ipInput');
 const connectBtn = document.getElementById('connectBtn');
+const apiKeyInput = document.getElementById('apiKeyInput');
+const saveKeyBtn = document.getElementById('saveKeyBtn');
 const micBtn = document.getElementById('micBtn');
+const textInput = document.getElementById('textInput');
+const sendBtn = document.getElementById('sendBtn');
 const statusEl = document.getElementById('status');
 const logEl = document.getElementById('log');
 
 ipInput.value = carIp;
+apiKeyInput.value = apiKey;
 
 function log(who, text) {
   const p = document.createElement('div');
   p.className = who;
-  p.textContent = (who === 'you' ? 'আপনি: ' : who === 'car' ? 'গাড়ি: ' : '') + text;
+  const prefix = who === 'you' ? 'আপনি: ' : who === 'car' ? 'গাড়ি: ' : who === 'ai' ? 'AI: ' : '';
+  p.textContent = prefix + text;
   logEl.appendChild(p);
   logEl.scrollTop = logEl.scrollHeight;
 }
 
 function speakBangla(text) {
+  if (!text) return;
   const u = new SpeechSynthesisUtterance(text);
   u.lang = 'bn-BD';
   speechSynthesis.speak(u);
 }
 
-function baseUrl() {
+function carBaseUrl() {
   return 'http://' + carIp;
 }
 
+function refreshControlsEnabled() {
+  const ready = !!carIp && !!apiKey;
+  micBtn.disabled = !ready;
+  textInput.disabled = !ready;
+  sendBtn.disabled = !ready;
+}
+
+// ---------------- Car connection ----------------
 connectBtn.addEventListener('click', async () => {
   carIp = ipInput.value.trim();
   if (!carIp) {
     statusEl.textContent = 'আগে গাড়ির IP লিখুন';
     return;
   }
-  localStorage.setItem(STORAGE_KEY, carIp);
+  localStorage.setItem(IP_KEY, carIp);
   statusEl.textContent = 'পরীক্ষা করা হচ্ছে...';
   try {
-    const res = await fetch(baseUrl() + '/', { method: 'GET' });
+    const res = await fetch(carBaseUrl() + '/', { method: 'GET' });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const text = await res.text();
-    statusEl.textContent = 'সংযুক্ত ✅ (' + carIp + ')';
+    statusEl.textContent = 'গাড়ির সাথে সংযুক্ত ✅ (' + carIp + ')';
     log('car', text);
-    micBtn.disabled = false;
+    refreshControlsEnabled();
+    startRfidPolling();
   } catch (err) {
     console.error(err);
     statusEl.textContent = 'সংযোগ ব্যর্থ ❌ — IP এবং WiFi চেক করুন';
     log('err', String(err));
-    micBtn.disabled = true;
+    stopRfidPolling();
+    refreshControlsEnabled();
   }
 });
 
-async function sendCommand(cmd) {
-  if (!carIp) {
-    statusEl.textContent = 'আগে সংযোগ পরীক্ষা করুন';
+saveKeyBtn.addEventListener('click', () => {
+  apiKey = apiKeyInput.value.trim();
+  if (!apiKey) {
+    statusEl.textContent = 'API key লিখুন';
     return;
   }
-  log('you', cmd);
+  localStorage.setItem(API_KEY, apiKey);
+  statusEl.textContent = 'API key সেভ হয়েছে ✅';
+  refreshControlsEnabled();
+});
+
+// ---------------- Sending a canonical command to the car ----------------
+async function sendCarCommand(cmd) {
+  if (!carIp) return;
   try {
-    const res = await fetch(baseUrl() + '/cmd?c=' + encodeURIComponent(cmd));
+    const res = await fetch(carBaseUrl() + '/cmd?c=' + encodeURIComponent(cmd));
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const reply = await res.text();
     log('car', reply);
     speakBangla(reply);
   } catch (err) {
     console.error(err);
-    statusEl.textContent = 'সংযোগ বিচ্ছিন্ন — আবার চেষ্টা করুন';
+    statusEl.textContent = 'গাড়ির সাথে সংযোগ বিচ্ছিন্ন হয়েছে';
     log('err', String(err));
   }
 }
 
-// Map recognized speech to the exact canonical words the car understands.
-// Add more phrasings on the left as you find what your voice tends to produce.
-const COMMAND_MAP = [
-  { keys: ['সামনে', 'সামনে যাও', 'এগিয়ে যাও'], cmd: 'সামনে' },
-  { keys: ['পেছনে', 'পিছনে', 'পিছনে যাও'], cmd: 'পেছনে' },
-  { keys: ['বামে', 'বামে যাও', 'বাম দিকে'], cmd: 'বামে' },
-  { keys: ['ডানে', 'ডানে যাও', 'ডান দিকে'], cmd: 'ডানে' },
-  { keys: ['থামো', 'থাম', 'দাঁড়াও'], cmd: 'থামো' },
-  { keys: ['ফলো করো', 'আমাকে ফলো করো', 'ফলো'], cmd: 'ফলো' },
-  { keys: ['ফলো বন্ধ', 'ফলো বন্ধ করো'], cmd: 'ফলো বন্ধ' },
-  { keys: ['খোলো', 'বক্স খোলো', 'ওষুধ দাও'], cmd: 'খোলো' },
-  { keys: ['বন্ধ করো', 'বক্স বন্ধ করো', 'বন্ধ'], cmd: 'বন্ধ' },
-  { keys: ['স্ট্যাটাস', 'অবস্থা কি'], cmd: 'স্ট্যাটাস' },
-];
-
-function matchCommand(heard) {
-  heard = heard.trim();
-  for (const entry of COMMAND_MAP) {
-    for (const key of entry.keys) {
-      if (heard.includes(key)) return entry.cmd;
+// ---------------- RFID "thank you" polling ----------------
+function startRfidPolling() {
+  stopRfidPolling();
+  rfidPollTimer = setInterval(async () => {
+    if (!carIp) return;
+    try {
+      const res = await fetch(carBaseUrl() + '/rfid_status');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.scanned) {
+        log('car', data.msg + (data.uid ? ' (কার্ড: ' + data.uid + ')' : ''));
+        speakBangla(data.msg);
+      }
+    } catch (err) {
+      // stay quiet on transient poll failures
     }
-  }
-  return null;
+  }, 2000);
+}
+function stopRfidPolling() {
+  if (rfidPollTimer) clearInterval(rfidPollTimer);
+  rfidPollTimer = null;
 }
 
+// ---------------- Gemini conversation ----------------
+const ACTIONS = ["সামনে","পেছনে","বামে","ডানে","থামো","ফলো","ফলো বন্ধ","খোলো","বন্ধ","স্ট্যাটাস","কিছুই না"];
+
+const SYSTEM_PROMPT = `
+তুমি একজন বন্ধুত্বপূর্ণ বাংলা ভাষী সহকারী, যে একটি voice-controlled RC গাড়ি নিয়ন্ত্রণে সাহায্য করো।
+ব্যবহারকারীর সাথে স্বাভাবিক, সংক্ষিপ্ত বাংলায় কথা বলবে।
+
+গাড়ি যা যা করতে পারে (এবং তার সাথে মিলিয়ে action বসাতে হবে):
+- "সামনে" -> সামনে এগিয়ে যাওয়া
+- "পেছনে" -> পেছনে যাওয়া
+- "বামে" -> বামে ঘোরা
+- "ডানে" -> ডানে ঘোরা
+- "থামো" -> থেমে যাওয়া
+- "ফলো" -> ব্যবহারকারীকে ফলো করা শুরু করা
+- "ফলো বন্ধ" -> ফলো করা বন্ধ করা
+- "খোলো" -> বক্স/ঢাকনা খোলা (যেমন ওষুধ বের করা)
+- "বন্ধ" -> বক্স/ঢাকনা বন্ধ করা
+- "স্ট্যাটাস" -> তাপমাত্রা ও দূরত্বের তথ্য জানানো
+- "কিছুই না" -> এখনো কোনো কাজ করার দরকার নেই (যেমন তুমি একটা স্পষ্টীকরণ প্রশ্ন করছো, বা এটা শুধু গল্প/সাধারণ কথা)
+
+নিয়ম:
+1. ঘুরিয়ে বললেও বুঝে ফেলো (যেমন "আমার ওষুধ লাগবে" মানে "খোলো")।
+2. অনুরোধ অস্পষ্ট হলে একটা ছোট্ট প্রশ্ন করো এবং action "কিছুই না" রাখো।
+3. অনুরোধ স্পষ্ট হলে ছোট্ট, বন্ধুত্বপূর্ণ একটা নিশ্চিতকরণ বাক্য বলো এবং সঠিক action সেট করো।
+4. জবাব সবসময় ছোট রাখবে (এক বাক্যে), কারণ এটা জোরে জোরে পড়া হবে।
+5. শুধুমাত্র উপরের তালিকার action-গুলোই ব্যবহার করবে, নতুন কোনো শব্দ বানাবে না।
+6. সবসময় শুধু JSON আকারে উত্তর দাও, অন্য কিছু লিখবে না।
+`.trim();
+
+let history = []; // [{role:"user"|"model", parts:[{text}]}]
+
+async function askGemini(userText) {
+  history.push({ role: "user", parts: [{ text: userText }] });
+
+  const body = {
+    system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
+    contents: history,
+    generationConfig: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: "OBJECT",
+        properties: {
+          reply: { type: "STRING" },
+          action: { type: "STRING", enum: ACTIONS }
+        },
+        required: ["reply", "action"]
+      }
+    }
+  };
+
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/' +
+              GEMINI_MODEL + ':generateContent?key=' + encodeURIComponent(apiKey);
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error('Gemini HTTP ' + res.status + ': ' + errText);
+  }
+
+  const data = await res.json();
+  const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!rawText) throw new Error('Gemini থেকে খালি উত্তর এসেছে');
+
+  const parsed = JSON.parse(rawText);
+
+  history.push({ role: "model", parts: [{ text: rawText }] });
+
+  return parsed; // { reply, action }
+}
+
+async function handleUserUtterance(userText) {
+  log('you', userText);
+  statusEl.textContent = 'AI ভাবছে...';
+  try {
+    const { reply, action } = await askGemini(userText);
+    log('ai', reply);
+    speakBangla(reply);
+
+    if (action && action !== 'কিছুই না' && ACTIONS.includes(action)) {
+      await sendCarCommand(action);
+    }
+    statusEl.textContent = 'সংযুক্ত ✅';
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = 'AI-এর সাথে সমস্যা হয়েছে';
+    log('err', String(err));
+  }
+}
+
+// ---------------- Text input path ----------------
+sendBtn.addEventListener('click', () => {
+  const text = textInput.value.trim();
+  if (!text) return;
+  textInput.value = '';
+  handleUserUtterance(text);
+});
+textInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') sendBtn.click();
+});
+
+// ---------------- Voice input path ----------------
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 let recognition;
 if (SpeechRecognition) {
   recognition = new SpeechRecognition();
   recognition.lang = 'bn-BD';
-  recognition.continuous = true;
+  recognition.continuous = false;
   recognition.interimResults = false;
 
   recognition.onresult = (event) => {
     const heard = event.results[event.results.length - 1][0].transcript;
-    log('you', '(শুনেছি) ' + heard);
-    const cmd = matchCommand(heard);
-    if (cmd) {
-      sendCommand(cmd);
-    } else {
-      speakBangla('দুঃখিত, বুঝতে পারিনি');
-    }
+    handleUserUtterance(heard);
   };
 
   recognition.onend = () => {
-    if (recognizing) recognition.start(); // keep listening
+    recognizing = false;
+    micBtn.classList.remove('listening');
+    micBtn.textContent = '🎤 বলুন';
+  };
+
+  recognition.onerror = (e) => {
+    console.error(e);
+    recognizing = false;
+    micBtn.classList.remove('listening');
+    micBtn.textContent = '🎤 বলুন';
   };
 } else {
-  statusEl.textContent = 'এই ব্রাউজারে ভয়েস সাপোর্ট নেই';
+  statusEl.textContent = 'এই ব্রাউজারে ভয়েস সাপোর্ট নেই — টাইপ করে ব্যবহার করুন';
 }
 
 micBtn.addEventListener('click', () => {
   if (!recognition) return;
-  recognizing = !recognizing;
-  micBtn.classList.toggle('listening', recognizing);
-  micBtn.textContent = recognizing ? '🎤 শুনছি...' : '🎤 বলুন';
-  if (recognizing) recognition.start();
-  else recognition.stop();
+  if (recognizing) {
+    recognition.stop();
+    return;
+  }
+  recognizing = true;
+  micBtn.classList.add('listening');
+  micBtn.textContent = '🎤 শুনছি...';
+  recognition.start();
 });
+
+refreshControlsEnabled();
+if (carIp) {
+  statusEl.textContent = carIp + ' — "সংযোগ পরীক্ষা করুন" চাপুন';
+}
 </script>
 </body>
 </html>
