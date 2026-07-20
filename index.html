@@ -1,245 +1,158 @@
-<!--
-  Save this file to your phone (e.g. via Google Drive/email to
-  yourself) and open it directly in Chrome - do NOT load it from
-  a web server. Opening it as a local file gives it microphone
-  permission (a "secure context"), which a plain http:// page
-  served by the ESP32 would not reliably get.
-
-  Before use, edit the three constants marked EDIT THIS below:
-    - GEMINI_API_KEY : your key from Google AI Studio
-    - WS_URL         : ws://esp32car.local/ws, or ws://<ESP32-IP>/ws
-                       if mDNS doesn't resolve on your network
-    - Phone and ESP32 must be on the same WiFi network/hotspot.
-
-  Notes:
-    - Voice input/output uses Chrome's built-in Web Speech API.
-      This works well on Android Chrome. iOS Safari's support for
-      this API is poor/inconsistent - if you're on iPhone, this
-      part may not work reliably.
-    - If the spoken reply doesn't come out in Bangla, check your
-      phone's Settings > Text-to-Speech engine and install/select
-      a Bangla voice - Chrome uses whatever TTS voices Android has
-      installed.
-    - Your Gemini API key is visible to anyone who opens this file
-      (it's plain client-side JS). That's fine for a personal
-      hobby project on your own phone, but don't post or share
-      this file with the key still in it.
--->
 <!DOCTYPE html>
 <html lang="bn">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>RC Car Control</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bangla RC Car Control</title>
 <style>
-  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
-  body {
-    margin: 0; padding: 16px;
-    font-family: -apple-system, Roboto, Arial, sans-serif;
-    background: #14161a; color: #eee;
-    display: flex; flex-direction: column; align-items: center; gap: 16px;
-  }
-  h1 { font-size: 18px; margin: 4px 0; color: #9fd0ff; }
-  #status { font-size: 13px; color: #9aa; text-align: center; }
-  #joystickBase {
-    width: 220px; height: 220px; border-radius: 50%;
-    background: #22262e; border: 2px solid #333; position: relative;
-    touch-action: none;
-  }
-  #joystickStick {
-    width: 80px; height: 80px; border-radius: 50%;
-    background: #3d8bfd; position: absolute; left: 70px; top: 70px;
-    box-shadow: 0 0 12px rgba(61,139,253,0.6);
-  }
-  #micBtn {
-    width: 90px; height: 90px; border-radius: 50%; border: none;
-    background: #2c2f36; color: #fff; font-size: 34px;
-    display: flex; align-items: center; justify-content: center;
-  }
-  #micBtn.listening { background: #d9455f; box-shadow: 0 0 16px rgba(217,69,95,0.7); }
-  #log {
-    width: 100%; max-width: 360px; height: 160px; overflow-y: auto;
-    background: #1b1d22; border: 1px solid #333; border-radius: 8px;
-    padding: 8px; font-size: 14px; line-height: 1.4;
-  }
-  .you { color: #9fd0ff; }
-  .bot { color: #9fe0a0; }
-  .sys { color: #888; font-size: 12px; }
-  #telemetry { font-size: 12px; color: #aaa; text-align: center; }
+  body { font-family: sans-serif; text-align: center; background:#111; color:#eee; padding: 20px; }
+  button { font-size: 18px; padding: 14px 22px; margin: 8px; border-radius: 10px; border:none; }
+  #connectBtn { background:#2563eb; color:white; }
+  #micBtn { background:#16a34a; color:white; }
+  #micBtn.listening { background:#dc2626; }
+  #log { text-align:left; max-width:480px; margin:20px auto; background:#1e1e1e; padding:10px;
+         border-radius:8px; height:260px; overflow-y:auto; font-size:14px; }
+  .you { color:#7dd3fc; }
+  .car { color:#86efac; }
+  #status { margin-top:10px; font-size:14px; color:#aaa; }
 </style>
 </head>
 <body>
-  <h1>🚗 RC Car Control</h1>
-  <div id="status">connecting...</div>
-
-  <div id="joystickBase">
-    <div id="joystickStick"></div>
-  </div>
-
-  <button id="micBtn">🎤</button>
-
+  <h2>বাংলা RC কার কন্ট্রোল</h2>
+  <button id="connectBtn">গাড়ির সাথে সংযোগ করুন</button>
+  <br>
+  <button id="micBtn" disabled>🎤 বলুন</button>
+  <div id="status">সংযোগ নেই</div>
   <div id="log"></div>
-  <div id="telemetry">--</div>
 
 <script>
-// ==================== EDIT THIS ====================
-const GEMINI_API_KEY = "PUT_YOUR_GEMINI_API_KEY_HERE";
-const GEMINI_MODEL   = "gemini-3.5-flash";
-const WS_URL         = "ws://esp32car.local/ws"; // or ws://192.168.x.x/ws
-const VOICE_LANG     = "bn-BD"; // Bangla (Bangladesh). Use "bn-IN" if that works better on your phone.
-// =====================================================
+/*
+  Requires Chrome/Edge on Android (Web Bluetooth) or Chrome desktop.
+  iOS Safari does not support Web Bluetooth — use "Bluefy" browser app on iPhone instead.
+  Must be served over https:// or from localhost (Web Bluetooth requirement).
+*/
 
-const SYSTEM_PROMPT =
-  "তুমি একটি ছোট রোবট গাড়ির বন্ধুত্বপূর্ণ কণ্ঠস্বর সহকারী। " +
-  "সবসময় বাংলায়, সংক্ষেপে (এক বা দুই বাক্যে) উত্তর দাও।";
+const SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+const CHAR_RX_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"; // write to car
+const CHAR_TX_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; // notify from car
 
-// ---------- WebSocket ----------
-let ws;
-function connectWs() {
-  ws = new WebSocket(WS_URL);
-  ws.onopen = () => setStatus("Connected to car");
-  ws.onclose = () => { setStatus("Disconnected - retrying..."); setTimeout(connectWs, 2000); };
-  ws.onerror = () => ws.close();
-  ws.onmessage = (evt) => {
-    const msg = evt.data;
-    if (msg.startsWith("SENSOR:")) {
-      document.getElementById("telemetry").textContent = msg.substring(7);
-    } else if (msg.startsWith("RFID:")) {
-      addLog("sys", "Card scan: " + msg.substring(5));
+let device, rxChar, txChar;
+let recognizing = false;
+
+const connectBtn = document.getElementById('connectBtn');
+const micBtn = document.getElementById('micBtn');
+const statusEl = document.getElementById('status');
+const logEl = document.getElementById('log');
+
+function log(who, text) {
+  const p = document.createElement('div');
+  p.className = who;
+  p.textContent = (who === 'you' ? 'আপনি: ' : 'গাড়ি: ') + text;
+  logEl.appendChild(p);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function speakBangla(text) {
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = 'bn-BD';
+  speechSynthesis.speak(u);
+}
+
+connectBtn.addEventListener('click', async () => {
+  try {
+    device = await navigator.bluetooth.requestDevice({
+      filters: [{ name: 'BanglaRC-Car' }],
+      optionalServices: [SERVICE_UUID]
+    });
+    const server = await device.gatt.connect();
+    const service = await server.getPrimaryService(SERVICE_UUID);
+    rxChar = await service.getCharacteristic(CHAR_RX_UUID);
+    txChar = await service.getCharacteristic(CHAR_TX_UUID);
+
+    await txChar.startNotifications();
+    txChar.addEventListener('characteristicvaluechanged', (e) => {
+      const text = new TextDecoder().decode(e.target.value);
+      log('car', text);
+      speakBangla(text);
+    });
+
+    statusEl.textContent = 'সংযুক্ত ✅';
+    micBtn.disabled = false;
+
+    device.addEventListener('gattserverdisconnected', () => {
+      statusEl.textContent = 'সংযোগ বিচ্ছিন্ন হয়েছে';
+      micBtn.disabled = true;
+    });
+  } catch (err) {
+    statusEl.textContent = 'সংযোগ ব্যর্থ: ' + err;
+  }
+});
+
+async function sendCommand(cmd) {
+  if (!rxChar) return;
+  await rxChar.writeValue(new TextEncoder().encode(cmd));
+  log('you', cmd);
+}
+
+// Map recognized speech to the exact canonical words the car understands.
+// Add more phrasings on the left as you find what your voice tends to produce.
+const COMMAND_MAP = [
+  { keys: ['সামনে', 'সামনে যাও', 'এগিয়ে যাও'], cmd: 'সামনে' },
+  { keys: ['পেছনে', 'পিছনে', 'পিছনে যাও'], cmd: 'পেছনে' },
+  { keys: ['বামে', 'বামে যাও', 'বাম দিকে'], cmd: 'বামে' },
+  { keys: ['ডানে', 'ডানে যাও', 'ডান দিকে'], cmd: 'ডানে' },
+  { keys: ['থামো', 'থাম', 'দাঁড়াও'], cmd: 'থামো' },
+  { keys: ['ফলো করো', 'আমাকে ফলো করো', 'ফলো'], cmd: 'ফলো' },
+  { keys: ['ফলো বন্ধ', 'ফলো বন্ধ করো'], cmd: 'ফলো বন্ধ' },
+  { keys: ['খোলো', 'বক্স খোলো', 'ওষুধ দাও'], cmd: 'খোলো' },
+  { keys: ['বন্ধ করো', 'বক্স বন্ধ করো', 'বন্ধ'], cmd: 'বন্ধ' },
+  { keys: ['স্ট্যাটাস', 'অবস্থা কি'], cmd: 'স্ট্যাটাস' },
+];
+
+function matchCommand(heard) {
+  heard = heard.trim();
+  for (const entry of COMMAND_MAP) {
+    for (const key of entry.keys) {
+      if (heard.includes(key)) return entry.cmd;
     }
-  };
-}
-function setStatus(s) { document.getElementById("status").textContent = s; }
-function wsSend(s) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(s); }
-connectWs();
-
-// ---------- Joystick ----------
-const base = document.getElementById("joystickBase");
-const stick = document.getElementById("joystickStick");
-const baseRadius = 110, stickRadius = 40;
-let dragging = false, curFb = 0, curTurn = 0;
-
-function setStick(dx, dy) {
-  stick.style.left = (110 - stickRadius + dx) + "px";
-  stick.style.top  = (110 - stickRadius + dy) + "px";
+  }
+  return null;
 }
 
-base.addEventListener("pointerdown", (e) => {
-  dragging = true;
-  base.setPointerCapture(e.pointerId);
-});
-base.addEventListener("pointermove", (e) => {
-  if (!dragging) return;
-  const rect = base.getBoundingClientRect();
-  let dx = e.clientX - (rect.left + baseRadius);
-  let dy = e.clientY - (rect.top + baseRadius);
-  const dist = Math.min(Math.hypot(dx, dy), baseRadius - stickRadius);
-  const angle = Math.atan2(dy, dx);
-  dx = Math.cos(angle) * dist;
-  dy = Math.sin(angle) * dist;
-  setStick(dx, dy);
-  // forward/back = -dy (up = forward), turn = dx, both scaled to -100..100
-  curFb = Math.round((-dy / (baseRadius - stickRadius)) * 100);
-  curTurn = Math.round((dx / (baseRadius - stickRadius)) * 100);
-});
-function releaseStick(e) {
-  dragging = false;
-  setStick(0, 0);
-  curFb = 0; curTurn = 0;
-  wsSend("DRIVE:0,0");
-}
-base.addEventListener("pointerup", releaseStick);
-base.addEventListener("pointercancel", releaseStick);
-
-// resend current drive values periodically - also acts as a keepalive
-// so the car's failsafe (400ms timeout) doesn't trip while holding still
-setInterval(() => { if (dragging) wsSend("DRIVE:" + curFb + "," + curTurn); }, 150);
-
-// ---------- Voice (Web Speech API + Gemini) ----------
-const micBtn = document.getElementById("micBtn");
-let recognition = null;
-if ("webkitSpeechRecognition" in window) {
-  recognition = new webkitSpeechRecognition();
-  recognition.lang = VOICE_LANG;
-  recognition.continuous = false;
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recognition;
+if (SpeechRecognition) {
+  recognition = new SpeechRecognition();
+  recognition.lang = 'bn-BD';
+  recognition.continuous = true;
   recognition.interimResults = false;
 
-  recognition.onstart = () => {
-    micBtn.classList.add("listening");
-    wsSend("LISTEN_START");
-    setStatus("শুনছি...");
-  };
   recognition.onresult = (event) => {
-    const transcript = event.results[0][0].transcript;
-    addLog("you", transcript);
-    wsSend("LISTEN_STOP");
-    askGemini(transcript);
+    const heard = event.results[event.results.length - 1][0].transcript;
+    log('you', '(শুনেছি) ' + heard);
+    const cmd = matchCommand(heard);
+    if (cmd) {
+      sendCommand(cmd);
+    } else {
+      speakBangla('দুঃখিত, বুঝতে পারিনি');
+    }
   };
-  recognition.onerror = (e) => {
-    addLog("sys", "Mic error: " + e.error);
-    micBtn.classList.remove("listening");
-    wsSend("IDLE");
-  };
+
   recognition.onend = () => {
-    micBtn.classList.remove("listening");
+    if (recognizing) recognition.start(); // keep listening
   };
-
-  micBtn.addEventListener("click", () => {
-    try { recognition.start(); } catch (e) { /* already running */ }
-  });
 } else {
-  micBtn.addEventListener("click", () => {
-    alert("Speech recognition isn't supported in this browser. Use Chrome on Android.");
-  });
+  statusEl.textContent = 'এই ব্রাউজারে ভয়েস সাপোর্ট নেই';
 }
 
-async function askGemini(userText) {
-  setStatus("ভাবছি...");
-  try {
-    const resp = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": GEMINI_API_KEY
-        },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: SYSTEM_PROMPT + "\n\nব্যবহারকারী: " + userText }] }]
-        })
-      }
-    );
-    const data = await resp.json();
-    const reply = data?.candidates?.[0]?.content?.parts?.[0]?.text || "(no reply)";
-    addLog("bot", reply);
-    setStatus("Connected to car");
-    wsSend("SPEAK:reply"); // OLED can't render Bangla script - see firmware notes
-    speak(reply);
-  } catch (err) {
-    addLog("sys", "Gemini error: " + err);
-    setStatus("Connected to car");
-    wsSend("IDLE");
-  }
-}
-
-function speak(text) {
-  if (!("speechSynthesis" in window)) return;
-  const utter = new SpeechSynthesisUtterance(text);
-  utter.lang = VOICE_LANG;
-  const voices = speechSynthesis.getVoices();
-  const bnVoice = voices.find(v => v.lang.startsWith("bn"));
-  if (bnVoice) utter.voice = bnVoice;
-  speechSynthesis.speak(utter);
-}
-
-function addLog(cls, text) {
-  const log = document.getElementById("log");
-  const div = document.createElement("div");
-  div.className = cls;
-  div.textContent = (cls === "you" ? "🧑 " : cls === "bot" ? "🤖 " : "• ") + text;
-  log.appendChild(div);
-  log.scrollTop = log.scrollHeight;
-}
+micBtn.addEventListener('click', () => {
+  if (!recognition) return;
+  recognizing = !recognizing;
+  micBtn.classList.toggle('listening', recognizing);
+  micBtn.textContent = recognizing ? '🎤 শুনছি...' : '🎤 বলুন';
+  if (recognizing) recognition.start();
+  else recognition.stop();
+});
 </script>
 </body>
 </html>
