@@ -77,7 +77,7 @@
 
 const IP_KEY  = 'banglarc_ip';
 const API_KEY = 'banglarc_gemini_key';
-const GEMINI_MODEL = 'gemini-2.5-flash';
+const GEMINI_MODEL = 'gemini-2.5-flash-lite';
 
 let carIp = localStorage.getItem(IP_KEY) || '';
 let apiKey = localStorage.getItem(API_KEY) || '';
@@ -135,6 +135,7 @@ connectBtn.addEventListener('click', async () => {
   statusEl.textContent = 'পরীক্ষা করা হচ্ছে...';
   try {
     const res = await fetch(carBaseUrl() + '/', { method: 'GET' });
+
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const text = await res.text();
     statusEl.textContent = 'গাড়ির সাথে সংযুক্ত ✅ (' + carIp + ')';
@@ -261,7 +262,8 @@ async function askGemini(userText) {
 
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error('Gemini HTTP ' + res.status + ': ' + errText);
+    console.error(errText);
+    throw new Error(`Gemini (${GEMINI_MODEL}) HTTP ${res.status}\n${errText}`);
   }
 
   const data = await res.json();
