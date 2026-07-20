@@ -3,24 +3,29 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Bangla RC Car Control</title>
+<title>Bangla RC Car Control (WiFi)</title>
 <style>
   body { font-family: sans-serif; text-align: center; background:#111; color:#eee; padding: 20px; }
   button { font-size: 18px; padding: 14px 22px; margin: 8px; border-radius: 10px; border:none; }
   #connectBtn { background:#2563eb; color:white; }
   #micBtn { background:#16a34a; color:white; }
   #micBtn.listening { background:#dc2626; }
+  input#ipInput { font-size: 16px; padding: 10px; border-radius: 8px; border: none; width: 200px; text-align:center; }
   #log { text-align:left; max-width:480px; margin:20px auto; background:#1e1e1e; padding:10px;
          border-radius:8px; height:260px; overflow-y:auto; font-size:14px; }
   .you { color:#7dd3fc; }
   .car { color:#86efac; }
+  .err { color:#f87171; }
   #status { margin-top:10px; font-size:14px; color:#aaa; }
 </style>
 </head>
 <body>
-  <h2>বাংলা RC কার কন্ট্রোল</h2>
-  <button id="connectBtn">গাড়ির সাথে সংযোগ করুন</button>
-  <button id="debugScanBtn">🔍 সব ডিভাইস স্ক্যান (ডিবাগ)</button>
+  <h2>বাংলা RC কার কন্ট্রোল (WiFi)</h2>
+
+  <div>
+    <input type="text" id="ipInput" placeholder="গাড়ির IP, যেমন 192.168.1.42">
+    <button id="connectBtn">সংযোগ পরীক্ষা করুন</button>
+  </div>
   <br>
   <button id="micBtn" disabled>🎤 বলুন</button>
   <div id="status">সংযোগ নেই</div>
@@ -28,27 +33,29 @@
 
 <script>
 /*
-  Requires Chrome/Edge on Android (Web Bluetooth) or Chrome desktop.
-  iOS Safari does not support Web Bluetooth — use "Bluefy" browser app on iPhone instead.
-  Must be served over https:// or from localhost (Web Bluetooth requirement).
+  Requires the phone/computer and the ESP32 to be on the SAME WiFi
+  network. Find the car's IP from the Serial Monitor (printed after it
+  connects to WiFi) or from the OLED screen, then type it into the box
+  above. No Bluetooth, no HTTPS required — works from any modern
+  browser including iOS Safari.
 */
 
-const SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
-const CHAR_RX_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"; // write to car
-const CHAR_TX_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; // notify from car
-
-let device, rxChar, txChar;
+const STORAGE_KEY = 'banglarc_ip';
+let carIp = localStorage.getItem(STORAGE_KEY) || '';
 let recognizing = false;
 
+const ipInput = document.getElementById('ipInput');
 const connectBtn = document.getElementById('connectBtn');
 const micBtn = document.getElementById('micBtn');
 const statusEl = document.getElementById('status');
 const logEl = document.getElementById('log');
 
+ipInput.value = carIp;
+
 function log(who, text) {
   const p = document.createElement('div');
   p.className = who;
-  p.textContent = (who === 'you' ? 'আপনি: ' : 'গাড়ি: ') + text;
+  p.textContent = (who === 'you' ? 'আপনি: ' : who === 'car' ? 'গাড়ি: ' : '') + text;
   logEl.appendChild(p);
   logEl.scrollTop = logEl.scrollHeight;
 }
@@ -59,68 +66,50 @@ function speakBangla(text) {
   speechSynthesis.speak(u);
 }
 
-connectBtn.addEventListener('click', async () => {
-  try {
-    device = await navigator.bluetooth.requestDevice({
-    filters: [{
-        services: [SERVICE_UUID]
-    }],
-    optionalServices: [SERVICE_UUID]
-    });
-    const server = await device.gatt.connect();
-    console.log("Connected");
-    const service = await server.getPrimaryService(SERVICE_UUID);
-    console.log("Service Found");
-    rxChar = await service.getCharacteristic(CHAR_RX_UUID);
-    console.log("RX OK");
-    txChar = await service.getCharacteristic(CHAR_TX_UUID);
-    console.log("TX OK");
-
-    if (!txChar) throw new Error("TX Characteristic Missing");
-    await txChar.startNotifications();
-    txChar.addEventListener('characteristicvaluechanged', (e) => {
-      const text = new TextDecoder().decode(e.target.value);
-      log('car', text);
-      speakBangla(text);
-    });
-
-    statusEl.textContent = 'সংযুক্ত ✅';
-    micBtn.disabled = false;
-
-    device.addEventListener('gattserverdisconnected', () => {
-      statusEl.textContent = 'সংযোগ বিচ্ছিন্ন হয়েছে';
-      micBtn.disabled = true;
-    });
-  } catch(err){
-    console.error(err);
-    alert(err.name + "\n\n" + err.message);
-    statusEl.textContent ="Connection Failed";
-
+function baseUrl() {
+  return 'http://' + carIp;
 }
-});
 
-// DEBUG: shows the OS device picker with every nearby BLE device, no name
-// filter. Use this if the normal connect button can't find "BanglaRC-Car" —
-// if the car isn't in this list either, the problem is on the phone/OS side
-// (Bluetooth/Nearby-devices permission, Bluetooth off, or the ESP32 isn't
-// actually advertising — check with nRF Connect app + ble_test.ino first).
-document.getElementById('debugScanBtn').addEventListener('click', async () => {
+connectBtn.addEventListener('click', async () => {
+  carIp = ipInput.value.trim();
+  if (!carIp) {
+    statusEl.textContent = 'আগে গাড়ির IP লিখুন';
+    return;
+  }
+  localStorage.setItem(STORAGE_KEY, carIp);
+  statusEl.textContent = 'পরীক্ষা করা হচ্ছে...';
   try {
-    const anyDevice = await navigator.bluetooth.requestDevice({
-      acceptAllDevices: true,
-      optionalServices: [SERVICE_UUID]
-    });
-    statusEl.textContent = 'তালিকায় দেখা গেছে: ' + anyDevice.name;
+    const res = await fetch(baseUrl() + '/', { method: 'GET' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const text = await res.text();
+    statusEl.textContent = 'সংযুক্ত ✅ (' + carIp + ')';
+    log('car', text);
+    micBtn.disabled = false;
   } catch (err) {
-    statusEl.textContent = 'ডিবাগ স্ক্যান ব্যর্থ: ' + err;
     console.error(err);
+    statusEl.textContent = 'সংযোগ ব্যর্থ ❌ — IP এবং WiFi চেক করুন';
+    log('err', String(err));
+    micBtn.disabled = true;
   }
 });
 
 async function sendCommand(cmd) {
-  if (!rxChar) return;
-  await rxChar.writeValue(new TextEncoder().encode(cmd));
+  if (!carIp) {
+    statusEl.textContent = 'আগে সংযোগ পরীক্ষা করুন';
+    return;
+  }
   log('you', cmd);
+  try {
+    const res = await fetch(baseUrl() + '/cmd?c=' + encodeURIComponent(cmd));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const reply = await res.text();
+    log('car', reply);
+    speakBangla(reply);
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = 'সংযোগ বিচ্ছিন্ন — আবার চেষ্টা করুন';
+    log('err', String(err));
+  }
 }
 
 // Map recognized speech to the exact canonical words the car understands.
