@@ -77,7 +77,12 @@
 
 const IP_KEY  = 'banglarc_ip';
 const API_KEY = 'banglarc_gemini_key';
-const GEMINI_MODEL = "gemini-2.5-flash";
+const GEMINI_MODELS = [
+    "gemini-flash-latest",
+    "gemini-3.5-flash",
+    "gemini-3.1-flash-lite"
+];
+const GEMINI_MODEL = GEMINI_MODELS[0];
 
 let carIp = localStorage.getItem(IP_KEY) || '';
 let apiKey = localStorage.getItem(API_KEY) || '';
@@ -262,10 +267,15 @@ async function askGemini(userText) {
 
   if (!res.ok) {
     const errText = await res.text();
-    console.error(errText);
-    throw new Error(`Gemini (${GEMINI_MODEL}) HTTP ${res.status}\n${errText}`);
-  }
 
+    console.error("Model:", GEMINI_MODEL);
+    console.error("Status:", res.status);
+    console.error(errText);
+
+    throw new Error(
+        `Gemini (${GEMINI_MODEL}) HTTP ${res.status}\n${errText}`
+    );
+  }
   const data = await res.json();
   const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!rawText) throw new Error('Gemini থেকে খালি উত্তর এসেছে');
