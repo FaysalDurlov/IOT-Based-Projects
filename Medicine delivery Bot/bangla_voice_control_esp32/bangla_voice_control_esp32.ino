@@ -1,26 +1,15 @@
 /*
-  Bangla Voice-Controlled RC Car — Follow Me + Lid Servo + AI Chat
+  Bangla Voice-Controlled RC Car — Follow Me + Lid Servo
   Board: ESP32-S3-WROOM-1 N16R8 (Arduino IDE)
   COMMS: WiFi (HTTP) — phone and ESP32 must be on the SAME Wi-Fi network.
 
   ARCHITECTURE:
-  The ESP32 does NOT talk to any AI itself. Your phone (using the
+  The ESP32 cannot understand speech itself. Your phone (using the
   companion "bangla_voice_control_wifi.html" page) listens in Bangla,
-  has a conversation with Gemini (Google AI Studio) to figure out what
-  you want, and only once it's decided on a specific action, sends that
-  ONE canonical Bangla command word to this sketch as a plain HTTP GET
-  request over your local Wi-Fi. This sketch drives the hardware and
-  sends back a short Bangla reply as the HTTP response body, which your
-  phone speaks aloud.
-
-  WHAT CHANGED FROM YOUR ORIGINAL SKETCH:
-   - Added RFID "card just scanned" tracking + a new /rfid_status
-     endpoint, so the phone can poll and say "ধন্যবাদ" (thank you)
-     when you tap a card. Everything else is unchanged.
-
-  RFID WIRING REMINDER (per your note):
-   - The MFRC522 module is 3.3V ONLY, NOT 5V-tolerant.
-   - Power VCC from the ESP32's 3V3 pin, never from a 5V rail.
+  turns speech into short command words, and sends them to this
+  sketch as a plain HTTP GET request over your local Wi-Fi. This
+  sketch drives the hardware and sends back a short Bangla reply as
+  the HTTP response body, which your phone speaks aloud.
 
   REQUIRED LIBRARIES (Arduino IDE > Tools > Manage Libraries):
    - ESP32Servo
@@ -31,7 +20,7 @@
    - DHT sensor library (by Adafruit)
    - MFRC522                     (by GithubCommunity)
    (WiFi.h, WebServer.h, ESPmDNS.h come built-in with the ESP32 board
-    package.)
+    package — no BLE libraries needed anymore.)
 
   BOARD SETTINGS (Tools menu):
    - Board: "ESP32S3 Dev Module"
@@ -102,7 +91,6 @@ const char* MDNS_NAME = "banglarc";
 
 // ---------------- Objects ----------------
 Adafruit_SSD1306 display(128, 64, &Wire, -1);
-bool bmpOK = false;
 Adafruit_BMP085 bmp;
 DHT dht(DHT_PIN, DHT_TYPE);
 Servo lidServo;
@@ -134,13 +122,7 @@ float temperature = 0, distanceCm = -1;
 double pressure = 0;
 String lastCmdShown = "-";
 
-// ---------------- RFID scan tracking (NEW) ----------------
-bool cardJustScanned = false;      // set true in loop(), cleared once the phone polls it
-String lastCardUidHex = "";        // last UID read, as hex text
-unsigned long lastCardMillis = 0;  // for a simple re-trigger cooldown
-const unsigned long CARD_COOLDOWN_MS = 3000; // ignore the same card sitting on the reader
-
-// ---------------- Reply helper ----------------
+// ---------------- Reply helper (replaces old BLE speak()) ----------------
 void speak(const String &bnText) {
   replyText = bnText;
   Serial.println(bnText);
@@ -200,7 +182,7 @@ void updateDisplay() {
   display.print("Temp: "); display.print(temperature, 1); display.println("C");
   display.print("Cmd: ");  display.println(lastCmdShown);
   if (wifiConnected) {
-    display.println(WiFi.localIP().toString());
+    display.print("IP: "); display.println(WiFi.localIP());
   } else {
     display.println("WiFi: connecting...");
   }
@@ -273,27 +255,6 @@ void handleCmdRequest() {
   server.send(200, "text/plain; charset=utf-8", reply);
 }
 
-// GET /rfid_status -> {"scanned":true/false,"msg":"...","uid":"..."}
-// The phone polls this every couple of seconds. If a card was tapped
-// since the last poll, "scanned" is true ONCE, then clears itself, so
-// the phone only says "thank you" a single time per tap.
-void handleRfidStatus() {
-  server.sendHeader("Access-Control-Allow-Origin", "*");
-  String json = "{";
-  if (cardJustScanned) {
-    json += "\"scanned\":true,";
-    json += "\"msg\":\"ধন্যবাদ\",";
-    json += "\"uid\":\"" + lastCardUidHex + "\"";
-    cardJustScanned = false; // consumed — won't fire again until next tap
-  } else {
-    json += "\"scanned\":false,";
-    json += "\"msg\":\"\",";
-    json += "\"uid\":\"\"";
-  }
-  json += "}";
-  server.send(200, "application/json; charset=utf-8", json);
-}
-
 // GET /  -> simple health check page, useful for testing in a browser
 void handleRoot() {
   server.sendHeader("Access-Control-Allow-Origin", "*");
@@ -309,102 +270,67 @@ void handleNotFound() {
 // ---------------- Setup ----------------
 void setup() {
   Serial.begin(115200);
-  delay(1000);
 
-  Serial.println("==========================");
-  Serial.println("SETUP STARTED");
-  Serial.println("==========================");
-
-  Serial.println("1");
   pinMode(L_RPWM, OUTPUT); pinMode(L_LPWM, OUTPUT); pinMode(L_EN, OUTPUT);
   pinMode(R_RPWM, OUTPUT); pinMode(R_LPWM, OUTPUT); pinMode(R_EN, OUTPUT);
-
-  Serial.println("2");
-  pinMode(L_EN, OUTPUT);
-  pinMode(R_EN, OUTPUT);
-
   digitalWrite(L_EN, HIGH);
   digitalWrite(R_EN, HIGH);
 
-  analogWrite(L_RPWM, 0);
-  analogWrite(L_LPWM, 0);
-  analogWrite(R_RPWM, 0);
-  analogWrite(R_LPWM, 0);
-
-  Serial.println("3");
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
 
-  Serial.println("4");
   Wire.begin(I2C_SDA, I2C_SCL);
-
-  Serial.println("5");
-  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)){
-    Serial.println("OLED FAILED");
-    while(true);
-  }
-  Serial.println("OLED OK");
-
+  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
   display.clearDisplay();
   display.display();
 
-  Serial.println("6");
-  bmpOK = bmp.begin();
-
-  if (bmpOK) {
-    Serial.println("BMP OK");
-  } else {
-    Serial.println("BMP FAILED");
-  }
-
-  Serial.println("7");
+  bmp.begin();
   dht.begin();
 
-  Serial.println("8");
-  // lidServo.setPeriodHertz(50);
-  // lidServo.attach(SERVO_PIN, 500, 2400);
-
-  Serial.println("9");
+  lidServo.setPeriodHertz(50);
+  lidServo.attach(SERVO_PIN, 500, 2400);
   closeLid();
 
-  Serial.println("10");
-  // RFID: MFRC522 is 3.3V only — VCC must come from the ESP32's 3V3 pin.
   SPI.begin(RFID_SCK, RFID_MISO, RFID_MOSI, RFID_SS);
-
-  Serial.println("11");
   rfid.PCD_Init();
 
-  Serial.println("12");
+  // ---- WiFi connect ----
   WiFi.mode(WIFI_STA);
-
-  Serial.println("13");
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-
-  Serial.println("14");
-  Serial.println("Connecting to WiFi");
-
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
+  Serial.print("Connecting to WiFi");
+  unsigned long wifiStart = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - wifiStart < 20000) {
+    delay(400);
     Serial.print(".");
   }
 
-  Serial.println();
-  Serial.println("15");
-  Serial.print("IP: ");
-  Serial.println(WiFi.localIP());
+  if (WiFi.status() == WL_CONNECTED) {
+    wifiConnected = true;
+    Serial.println();
+    Serial.print("WiFi connected. IP address: ");
+    Serial.println(WiFi.localIP());
+
+    if (MDNS.begin(MDNS_NAME)) {
+      Serial.print("mDNS started: http://");
+      Serial.print(MDNS_NAME);
+      Serial.println(".local/  (may not resolve on all phones — use the IP above if it fails)");
+    }
+  } else {
+    Serial.println();
+    Serial.println("WiFi FAILED to connect within 20s. Check SSID/password and retry (device will keep retrying in background).");
+  }
 
   server.on("/", handleRoot);
   server.on("/cmd", handleCmdRequest);
-  server.on("/rfid_status", handleRfidStatus);
+  server.onNotFound(handleNotFound);
   server.begin();
+  Serial.println("HTTP server started on port 80.");
 
-  Serial.println("16");
+  updateDisplay();
 }
 
 // ---------------- Loop ----------------
 void loop() {
-  Serial.println("Loop started");
-  delay(1000);
   server.handleClient();
 
   // Keep wifiConnected flag accurate + auto-retry if the connection drops
@@ -443,32 +369,16 @@ void loop() {
     lastSensorRead = millis();
     distanceCm = readDistanceCm();
     temperature = dht.readTemperature();
-    if (bmpOK) {
-      pressure = bmp.readPressure();
-    } else {
-      pressure = 0;
-    }
+    pressure = bmp.readPressure();
     updateDisplay();
   }
 
-  // RFID: when a new card is tapped, flag it so the phone can say "thank you"
+  // RFID (read-only for now; UID printed to Serial — ask if you want
+  // this to gate lid open/close by authorized card)
   if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial()) {
-    String uidHex = "";
-    for (byte i = 0; i < rfid.uid.size; i++) {
-      if (rfid.uid.uidByte[i] < 0x10) uidHex += "0";
-      uidHex += String(rfid.uid.uidByte[i], HEX);
-    }
     Serial.print("Card UID: ");
-    Serial.println(uidHex);
-
-    if (millis() - lastCardMillis > CARD_COOLDOWN_MS) {
-      cardJustScanned = true;
-      lastCardUidHex = uidHex;
-      lastCardMillis = millis();
-      speak("ধন্যবাদ"); // also reflected on OLED / Serial
-      updateDisplay();
-    }
-
+    for (byte i = 0; i < rfid.uid.size; i++) Serial.print(rfid.uid.uidByte[i], HEX);
+    Serial.println();
     rfid.PICC_HaltA();
   }
 }
