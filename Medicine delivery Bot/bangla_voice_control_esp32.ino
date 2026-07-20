@@ -388,25 +388,11 @@ void setup() {
     Serial.print(".");
   }
 
-  wifiConnected = true;
-
   Serial.println();
-  Serial.println("================================");
-  Serial.println("WiFi Connected!");
-  Serial.print("SSID: ");
-  Serial.println(WIFI_SSID);
-
-  Serial.print("IP Address: ");
+  Serial.println("15");
+  Serial.print("IP: ");
   Serial.println(WiFi.localIP());
 
-  Serial.print("Hostname: http://");
-  Serial.print(MDNS_NAME);
-  Serial.println(".local");
-
-  Serial.println("================================");
-
-  
-  
   server.on("/", handleRoot);
   server.on("/cmd", handleCmdRequest);
   server.on("/rfid_status", handleRfidStatus);
