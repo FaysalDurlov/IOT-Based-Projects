@@ -283,11 +283,20 @@ void setup() {
   rxChar->setCallbacks(new RxCallbacks());
 
   service->start();
-  BLEDevice::getAdvertising()->addServiceUUID(SERVICE_UUID);
+
+  // IMPORTANT: by default the ESP32 BLE library does NOT put the device's
+  // name into the advertisement/scan-response packet, so Chrome's
+  // requestDevice({filters:[{name:...}]}) can fail to find it even though
+  // the device is advertising. Force the name in explicitly.
+  BLEAdvertising *advertising = BLEDevice::getAdvertising();
+  advertising->addServiceUUID(SERVICE_UUID);
+  advertising->setScanResponse(true);
+  advertising->setMinPreferred(0x06);
+  advertising->setMinPreferred(0x12);
   BLEDevice::startAdvertising();
 
   updateDisplay();
-  Serial.println("BLE advertising as BanglaRC-Car");
+  Serial.println("BLE advertising as BanglaRC-Car — open Serial Monitor to confirm this line prints without the board rebooting.");
 }
 
 // ---------------- Loop ----------------

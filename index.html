@@ -20,6 +20,7 @@
 <body>
   <h2>বাংলা RC কার কন্ট্রোল</h2>
   <button id="connectBtn">গাড়ির সাথে সংযোগ করুন</button>
+  <button id="debugScanBtn">🔍 সব ডিভাইস স্ক্যান (ডিবাগ)</button>
   <br>
   <button id="micBtn" disabled>🎤 বলুন</button>
   <div id="status">সংযোগ নেই</div>
@@ -85,6 +86,25 @@ connectBtn.addEventListener('click', async () => {
     });
   } catch (err) {
     statusEl.textContent = 'সংযোগ ব্যর্থ: ' + err;
+    console.error(err);
+  }
+});
+
+// DEBUG: shows the OS device picker with every nearby BLE device, no name
+// filter. Use this if the normal connect button can't find "BanglaRC-Car" —
+// if the car isn't in this list either, the problem is on the phone/OS side
+// (Bluetooth/Nearby-devices permission, Bluetooth off, or the ESP32 isn't
+// actually advertising — check with nRF Connect app + ble_test.ino first).
+document.getElementById('debugScanBtn').addEventListener('click', async () => {
+  try {
+    const anyDevice = await navigator.bluetooth.requestDevice({
+      acceptAllDevices: true,
+      optionalServices: [SERVICE_UUID]
+    });
+    statusEl.textContent = 'তালিকায় দেখা গেছে: ' + anyDevice.name;
+  } catch (err) {
+    statusEl.textContent = 'ডিবাগ স্ক্যান ব্যর্থ: ' + err;
+    console.error(err);
   }
 });
 
