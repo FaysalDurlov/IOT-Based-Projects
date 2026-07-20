@@ -1,412 +1,186 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="bn">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Bangla Voice Assistant - Stage A Test</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bangla RC Car Control (WiFi)</title>
 <style>
-  * { box-sizing: border-box; }
-  body {
-    font-family: -apple-system, system-ui, sans-serif;
-    background: #111;
-    color: #eee;
-    margin: 0;
-    padding: 20px;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-  }
-  h1 { font-size: 18px; text-align: center; color: #9cf; }
-  .apikey-box {
-    width: 100%;
-    max-width: 420px;
-    margin-bottom: 20px;
-  }
-  input[type="password"], input[type="text"] {
-    width: 100%;
-    padding: 10px;
-    border-radius: 8px;
-    border: 1px solid #444;
-    background: #222;
-    color: #eee;
-    font-size: 14px;
-  }
-  label { font-size: 12px; color: #999; display: block; margin-bottom: 4px; }
-  .status {
-    font-size: 20px;
-    font-weight: bold;
-    margin: 20px 0;
-    padding: 12px 24px;
-    border-radius: 999px;
-    background: #222;
-    min-width: 200px;
-    text-align: center;
-    transition: background 0.3s, color 0.3s;
-  }
-  .status.idle { color: #888; }
-  .status.listening { background: #1a3a1a; color: #6f6; }
-  .status.thinking { background: #3a3a1a; color: #ff6; }
-  .status.speaking { background: #1a1a3a; color: #69f; }
-  .status.error { background: #3a1a1a; color: #f66; }
-
-  button#talkBtn {
-    width: 160px;
-    height: 160px;
-    border-radius: 50%;
-    border: none;
-    font-size: 18px;
-    font-weight: bold;
-    background: #2563eb;
-    color: white;
-    touch-action: none;
-    user-select: none;
-    -webkit-user-select: none;
-  }
-  button#talkBtn:active { background: #1d4ed8; transform: scale(0.97); }
-  button#talkBtn:disabled { background: #444; color: #888; }
-
-  .transcript-box {
-    width: 100%;
-    max-width: 420px;
-    margin-top: 24px;
-    background: #1a1a1a;
-    border-radius: 10px;
-    padding: 14px;
-    font-size: 15px;
-    line-height: 1.6;
-    min-height: 60px;
-    white-space: pre-wrap;
-  }
-  .transcript-box .label { font-size: 11px; color: #777; text-transform: uppercase; margin-bottom: 4px; }
+  body { font-family: sans-serif; text-align: center; background:#111; color:#eee; padding: 20px; }
+  button { font-size: 18px; padding: 14px 22px; margin: 8px; border-radius: 10px; border:none; }
+  #connectBtn { background:#2563eb; color:white; }
+  #micBtn { background:#16a34a; color:white; }
+  #micBtn.listening { background:#dc2626; }
+  input#ipInput, input#apiKeyInput { font-size: 16px; padding: 10px; border-radius: 8px; border: none; width: 220px; text-align:center; }
+  #log { text-align:left; max-width:480px; margin:20px auto; background:#1e1e1e; padding:10px;
+         border-radius:8px; height:260px; overflow-y:auto; font-size:14px; }
+  .you { color:#7dd3fc; }
+  .car { color:#86efac; }
+  .ai  { color:#c4b5fd; }
+  .err { color:#f87171; }
+  #status { margin-top:10px; font-size:14px; color:#aaa; }
+  #aiToggleRow { margin-top: 14px; font-size: 14px; }
+  small.note { display:block; max-width:480px; margin:6px auto 0; color:#888; font-size:12px; }
 </style>
 </head>
 <body>
+  <h2>বাংলা RC কার কন্ট্রোল (WiFi + AI)</h2>
 
-<h1>Bangla Voice Assistant - Stage A</h1>
+  <div>
+    <input type="text" id="ipInput" placeholder="গাড়ির IP, যেমন 192.168.1.42">
+    <button id="connectBtn">সংযোগ পরীক্ষা করুন</button>
+  </div>
 
-<div class="apikey-box">
-  <label for="apiKey">Gemini API key (stored only in this browser)</label>
-  <input type="password" id="apiKey" placeholder="Paste your Gemini API key here">
-</div>
+  <div id="aiToggleRow">
+    <input type="password" id="apiKeyInput" placeholder="Anthropic API key (ঐচ্ছিক)">
+    <label style="margin-left:8px;"><input type="checkbox" id="aiEnabled"> AI কথোপকথন চালু</label>
+    <small class="note">API key শুধু আপনার ফোনে (localStorage-এ) থাকে। এই পেজ পাবলিকভাবে শেয়ার করবেন না — key কোডে দেখা যাবে।</small>
+  </div>
 
-<button id="connectBtn" style="margin-bottom:16px; padding:10px 20px; border-radius:8px; border:none; background:#059669; color:white; font-weight:bold;">Connect to Car (Bluetooth)</button>
-<div id="bleStatus" style="font-size:12px; color:#888; margin-bottom:10px;">Not connected</div>
-
-<div id="status" class="status idle">Idle</div>
-
-<button id="talkBtn">Hold to Talk</button>
-
-<div class="transcript-box">
-  <div class="label">Assistant reply (Bangla)</div>
-  <div id="replyText">-</div>
-</div>
-
-<audio id="player" style="display:none;"></audio>
+  <br>
+  <button id="micBtn" disabled>🎤 বলুন</button>
+  <div id="status">সংযোগ নেই</div>
+  <div id="log"></div>
 
 <script>
-const apiKeyInput = document.getElementById('apiKey');
-const statusEl = document.getElementById('status');
-const talkBtn = document.getElementById('talkBtn');
-const replyTextEl = document.getElementById('replyText');
-const player = document.getElementById('player');
+/*
+  Requires the phone/computer and the ESP32 to be on the SAME WiFi
+  network. Find the car's IP from the Serial Monitor (printed after it
+  connects to WiFi) or from the OLED screen, then type it into the box
+  above. No Bluetooth, no HTTPS required — works from any modern
+  browser including iOS Safari.
+*/
 
-// Restore saved API key if present
-apiKeyInput.value = localStorage.getItem('gemini_api_key') || '';
-apiKeyInput.addEventListener('change', () => {
-  localStorage.setItem('gemini_api_key', apiKeyInput.value);
+const STORAGE_KEY = 'banglarc_ip';
+let carIp = localStorage.getItem(STORAGE_KEY) || '';
+let recognizing = false;
+
+const ipInput = document.getElementById('ipInput');
+const connectBtn = document.getElementById('connectBtn');
+const micBtn = document.getElementById('micBtn');
+const statusEl = document.getElementById('status');
+const logEl = document.getElementById('log');
+
+ipInput.value = carIp;
+
+function log(who, text) {
+  const p = document.createElement('div');
+  p.className = who;
+  p.textContent = (who === 'you' ? 'আপনি: ' : who === 'car' ? 'গাড়ি: ' : '') + text;
+  logEl.appendChild(p);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function speakBangla(text) {
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = 'bn-BD';
+  speechSynthesis.speak(u);
+}
+
+function baseUrl() {
+  return 'http://' + carIp;
+}
+
+connectBtn.addEventListener('click', async () => {
+  carIp = ipInput.value.trim();
+  if (!carIp) {
+    statusEl.textContent = 'আগে গাড়ির IP লিখুন';
+    return;
+  }
+  localStorage.setItem(STORAGE_KEY, carIp);
+  statusEl.textContent = 'পরীক্ষা করা হচ্ছে...';
+  try {
+    const res = await fetch(baseUrl() + '/', { method: 'GET' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const text = await res.text();
+    statusEl.textContent = 'সংযুক্ত ✅ (' + carIp + ')';
+    log('car', text);
+    micBtn.disabled = false;
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = 'সংযোগ ব্যর্থ ❌ — IP এবং WiFi চেক করুন';
+    log('err', String(err));
+    micBtn.disabled = true;
+  }
 });
 
-// Model names - check https://ai.google.dev/gemini-api/docs/models if these
-// stop working, Google renames/rotates preview model names periodically.
-const CHAT_MODEL = 'gemini-2.5-flash';
-const TTS_MODEL = 'gemini-2.5-flash-preview-tts';
-
-// Must match the UUIDs in the ESP32 sketch exactly.
-const BLE_SERVICE_UUID = '4fafc201-1fb5-459e-8fcc-c5c9c331914b';
-const BLE_CHAR_UUID     = 'beb5483e-36e1-4688-b7f5-ea07361b26a8';
-
-let bleCharacteristic = null;
-
-const connectBtn = document.getElementById('connectBtn');
-const bleStatusEl = document.getElementById('bleStatus');
-
-connectBtn.addEventListener('click', connectBle);
-
-async function connectBle() {
-  if (!navigator.bluetooth) {
-    bleStatusEl.textContent = 'Web Bluetooth not supported in this browser - use Chrome on Android';
+async function sendCommand(cmd) {
+  if (!carIp) {
+    statusEl.textContent = 'আগে সংযোগ পরীক্ষা করুন';
     return;
   }
+  log('you', cmd);
   try {
-    bleStatusEl.textContent = 'Requesting device...';
-    const device = await navigator.bluetooth.requestDevice({
-      filters: [{ services: [BLE_SERVICE_UUID] }]
-    });
-    const server = await device.gatt.connect();
-    const service = await server.getPrimaryService(BLE_SERVICE_UUID);
-    bleCharacteristic = await service.getCharacteristic(BLE_CHAR_UUID);
-    bleStatusEl.textContent = 'Connected to ' + device.name;
-    connectBtn.textContent = 'Connected';
-    connectBtn.disabled = true;
+    const res = await fetch(baseUrl() + '/cmd?c=' + encodeURIComponent(cmd));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const reply = await res.text();
+    log('car', reply);
+    speakBangla(reply);
   } catch (err) {
     console.error(err);
-    bleStatusEl.textContent = 'Connection failed: ' + err.message;
+    statusEl.textContent = 'সংযোগ বিচ্ছিন্ন — আবার চেষ্টা করুন';
+    log('err', String(err));
   }
 }
 
-async function sendBleMessage(text) {
-  if (!bleCharacteristic) return;  // not connected - silently skip, voice AI still works without it
-  try {
-    const encoder = new TextEncoder();
-    await bleCharacteristic.writeValue(encoder.encode(text));
-  } catch (err) {
-    console.error('BLE write failed:', err);
-  }
-}
+// Map recognized speech to the exact canonical words the car understands.
+// Add more phrasings on the left as you find what your voice tends to produce.
+const COMMAND_MAP = [
+  { keys: ['সামনে', 'সামনে যাও', 'এগিয়ে যাও'], cmd: 'সামনে' },
+  { keys: ['পেছনে', 'পিছনে', 'পিছনে যাও'], cmd: 'পেছনে' },
+  { keys: ['বামে', 'বামে যাও', 'বাম দিকে'], cmd: 'বামে' },
+  { keys: ['ডানে', 'ডানে যাও', 'ডান দিকে'], cmd: 'ডানে' },
+  { keys: ['থামো', 'থাম', 'দাঁড়াও'], cmd: 'থামো' },
+  { keys: ['ফলো করো', 'আমাকে ফলো করো', 'ফলো'], cmd: 'ফলো' },
+  { keys: ['ফলো বন্ধ', 'ফলো বন্ধ করো'], cmd: 'ফলো বন্ধ' },
+  { keys: ['খোলো', 'বক্স খোলো', 'ওষুধ দাও'], cmd: 'খোলো' },
+  { keys: ['বন্ধ করো', 'বক্স বন্ধ করো', 'বন্ধ'], cmd: 'বন্ধ' },
+  { keys: ['স্ট্যাটাস', 'অবস্থা কি'], cmd: 'স্ট্যাটাস' },
+];
 
-let mediaRecorder = null;
-let audioChunks = [];
-let stream = null;
-
-function setStatus(text, cls) {
-  statusEl.textContent = text;
-  statusEl.className = 'status ' + cls;
-}
-
-async function startRecording() {
-  const apiKey = apiKeyInput.value.trim();
-  if (!apiKey) {
-    setStatus('Enter API key first', 'error');
-    return;
-  }
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  } catch (err) {
-    setStatus('Mic permission denied', 'error');
-    console.error(err);
-    return;
-  }
-
-  audioChunks = [];
-  // audio/mp4 tends to work more reliably on iOS Safari than webm
-  const mimeType = MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : 'audio/webm';
-  mediaRecorder = new MediaRecorder(stream, { mimeType });
-
-  mediaRecorder.ondataavailable = (e) => {
-    if (e.data.size > 0) audioChunks.push(e.data);
-  };
-  mediaRecorder.onstop = () => handleRecordingStop(mimeType);
-
-  mediaRecorder.start();
-  setStatus('Listening...', 'listening');
-  sendBleMessage('STATE:listening');
-}
-
-function stopRecording() {
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-    mediaRecorder.stop();
-  }
-  if (stream) {
-    stream.getTracks().forEach(t => t.stop());
-  }
-}
-
-async function handleRecordingStop(mimeType) {
-  setStatus('Thinking...', 'thinking');
-  sendBleMessage('STATE:thinking');
-  try {
-    const audioBlob = new Blob(audioChunks, { type: mimeType });
-    const base64Audio = await blobToBase64(audioBlob);
-    const result = await getGeminiReply(base64Audio, mimeType);
-    replyTextEl.textContent = result.reply + '\n\n[command: ' + result.command + ']';
-
-    if (result.command && result.command !== 'none') {
-      sendBleMessage('CMD:' + result.command);
+function matchCommand(heard) {
+  heard = heard.trim();
+  for (const entry of COMMAND_MAP) {
+    for (const key of entry.keys) {
+      if (heard.includes(key)) return entry.cmd;
     }
-
-    setStatus('Speaking...', 'speaking');
-    sendBleMessage('STATE:speaking');
-    const wavBlob = await getGeminiSpeech(result.reply);
-    await playAudioBlob(wavBlob);
-
-    setStatus('Idle', 'idle');
-    sendBleMessage('STATE:idle');
-  } catch (err) {
-    console.error(err);
-    setStatus('Error - see console', 'error');
-    sendBleMessage('STATE:idle');
   }
+  return null;
 }
 
-function blobToBase64(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result.split(',')[1]);
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
-}
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recognition;
+if (SpeechRecognition) {
+  recognition = new SpeechRecognition();
+  recognition.lang = 'bn-BD';
+  recognition.continuous = true;
+  recognition.interimResults = false;
 
-async function getGeminiReply(base64Audio, mimeType) {
-  const apiKey = apiKeyInput.value.trim();
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${CHAT_MODEL}:generateContent?key=${apiKey}`;
-
-  const responseSchema = {
-    type: "object",
-    properties: {
-      transcript: { type: "string", description: "What the user said, transcribed in Bangla" },
-      reply: { type: "string", description: "Your natural spoken reply, in Bangla only, 1-3 short sentences" },
-      command: {
-        type: "string",
-        enum: ["forward", "backward", "left", "right", "stop", "none"],
-        description: "If the user asked the car/robot to physically move, the matching command. Otherwise 'none'."
-      }
-    },
-    required: ["transcript", "reply", "command"]
-  };
-
-  const body = {
-    contents: [{
-      parts: [
-        {
-          text: "You are a friendly voice assistant on a small home robot car that understands Bengali (Bangla). " +
-                "The attached audio is the user speaking to you in Bangla. " +
-                "Transcribe what they said, reply naturally in Bangla as if continuing a spoken conversation, " +
-                "and if they asked the car to move (e.g. 'সামনে যাও' = go forward, 'পিছনে যাও' = go backward, " +
-                "'বামে ঘোরো' = turn left, 'ডানে ঘোরো' = turn right, 'থামো' = stop), set the command field accordingly. " +
-                "For anything that isn't a movement request, set command to 'none'."
-        },
-        {
-          inline_data: {
-            mime_type: mimeType,
-            data: base64Audio
-          }
-        }
-      ]
-    }],
-    generationConfig: {
-      responseMimeType: "application/json",
-      responseSchema: responseSchema
+  recognition.onresult = (event) => {
+    const heard = event.results[event.results.length - 1][0].transcript;
+    log('you', '(শুনেছি) ' + heard);
+    const cmd = matchCommand(heard);
+    if (cmd) {
+      sendCommand(cmd);
+    } else {
+      speakBangla('দুঃখিত, বুঝতে পারিনি');
     }
   };
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
-
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error('Gemini chat call failed: ' + res.status + ' ' + errText);
-  }
-
-  const data = await res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error('No text in Gemini response: ' + JSON.stringify(data));
-
-  const parsed = JSON.parse(text);
-  return parsed;  // { transcript, reply, command }
-}
-
-async function getGeminiSpeech(text) {
-  const apiKey = apiKeyInput.value.trim();
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${TTS_MODEL}:generateContent?key=${apiKey}`;
-
-  const body = {
-    contents: [{
-      parts: [{ text: text }]
-    }],
-    generationConfig: {
-      responseModalities: ["AUDIO"],
-      speechConfig: {
-        voiceConfig: {
-          prebuiltVoiceConfig: { voiceName: "Kore" }
-        }
-      }
-    }
+  recognition.onend = () => {
+    if (recognizing) recognition.start(); // keep listening
   };
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
-
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error('Gemini TTS call failed: ' + res.status + ' ' + errText);
-  }
-
-  const data = await res.json();
-  const audioPart = data?.candidates?.[0]?.content?.parts?.[0]?.inlineData;
-  if (!audioPart) throw new Error('No audio in Gemini TTS response: ' + JSON.stringify(data));
-
-  // Gemini TTS returns raw PCM (16-bit, mono, 24kHz) with no WAV header,
-  // so we build one ourselves before the browser can play it.
-  const pcmBytes = base64ToBytes(audioPart.data);
-  return pcmToWavBlob(pcmBytes, 24000);
+} else {
+  statusEl.textContent = 'এই ব্রাউজারে ভয়েস সাপোর্ট নেই';
 }
 
-function base64ToBytes(base64) {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
-}
-
-function pcmToWavBlob(pcmBytes, sampleRate) {
-  const numChannels = 1;
-  const bitsPerSample = 16;
-  const byteRate = sampleRate * numChannels * (bitsPerSample / 8);
-  const blockAlign = numChannels * (bitsPerSample / 8);
-  const dataSize = pcmBytes.length;
-
-  const buffer = new ArrayBuffer(44 + dataSize);
-  const view = new DataView(buffer);
-
-  writeString(view, 0, 'RIFF');
-  view.setUint32(4, 36 + dataSize, true);
-  writeString(view, 8, 'WAVE');
-  writeString(view, 12, 'fmt ');
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);   // PCM format
-  view.setUint16(22, numChannels, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, byteRate, true);
-  view.setUint16(32, blockAlign, true);
-  view.setUint16(34, bitsPerSample, true);
-  writeString(view, 36, 'data');
-  view.setUint32(40, dataSize, true);
-
-  new Uint8Array(buffer, 44).set(pcmBytes);
-
-  return new Blob([buffer], { type: 'audio/wav' });
-}
-
-function writeString(view, offset, str) {
-  for (let i = 0; i < str.length; i++) {
-    view.setUint8(offset + i, str.charCodeAt(i));
-  }
-}
-
-function playAudioBlob(blob) {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(blob);
-    player.src = url;
-    player.onended = () => { URL.revokeObjectURL(url); resolve(); };
-    player.onerror = reject;
-    player.play().catch(reject);
-  });
-}
-
-// Hold-to-talk controls (touch + mouse, since this needs to work on iPhone)
-talkBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startRecording(); });
-talkBtn.addEventListener('touchend', (e) => { e.preventDefault(); stopRecording(); });
-talkBtn.addEventListener('mousedown', startRecording);
-talkBtn.addEventListener('mouseup', stopRecording);
+micBtn.addEventListener('click', () => {
+  if (!recognition) return;
+  recognizing = !recognizing;
+  micBtn.classList.toggle('listening', recognizing);
+  micBtn.textContent = recognizing ? '🎤 শুনছি...' : '🎤 বলুন';
+  if (recognizing) recognition.start();
+  else recognition.stop();
+});
 </script>
-
 </body>
 </html>
