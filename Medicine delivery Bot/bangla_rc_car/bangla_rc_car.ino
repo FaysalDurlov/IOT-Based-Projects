@@ -112,10 +112,21 @@ String lastCmdShown = "-";
 
 // ---------------- BLE callbacks ----------------
 class ServerCallbacks : public BLEServerCallbacks {
-  void onConnect(BLEServer* s) override { bleConnected = true; }
+
+  void onConnect(BLEServer* s) override {
+      bleConnected = true;
+      Serial.println("Phone connected");
+  }
+
   void onDisconnect(BLEServer* s) override {
-    bleConnected = false;
-    BLEDevice::startAdvertising();
+
+      bleConnected = false;
+
+      Serial.println("Phone disconnected");
+
+      delay(300);
+
+      BLEDevice::startAdvertising();
   }
 };
 
@@ -124,6 +135,9 @@ class RxCallbacks : public BLECharacteristicCallbacks {
     String v = String(c->getValue().c_str());
     v.trim();
     if (v.length() > 0) {
+      Serial.print("Received: ");
+      Serial.println(v);
+
       incomingCmd = v;
       newCommand = true;
     }
@@ -199,7 +213,8 @@ void updateDisplay() {
 // The phone app sends one of these canonical Bangla words/phrases.
 void handleCommand(String cmd) {
   lastCmdShown = cmd;
-
+  Serial.print("Command = ");
+  Serial.println(cmd);
   if (cmd == "সামনে") {
     currentMode = DRIVING;
     driveForward();
@@ -288,11 +303,23 @@ void setup() {
   // name into the advertisement/scan-response packet, so Chrome's
   // requestDevice({filters:[{name:...}]}) can fail to find it even though
   // the device is advertising. Force the name in explicitly.
+  service->start();
+
   BLEAdvertising *advertising = BLEDevice::getAdvertising();
-  advertising->addServiceUUID(SERVICE_UUID);
+
+  BLEAdvertisementData advData;
+  advData.setName("BanglaRC-Car");
+  advData.setCompleteServices(BLEUUID(SERVICE_UUID));
+
+  advertising->setAdvertisementData(advData);
+
+  BLEAdvertisementData scanData;
+  scanData.setName("BanglaRC-Car");
+
+  advertising->setScanResponseData(scanData);
+
   advertising->setScanResponse(true);
-  advertising->setMinPreferred(0x06);
-  advertising->setMinPreferred(0x12);
+
   BLEDevice::startAdvertising();
 
   updateDisplay();

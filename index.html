@@ -62,14 +62,21 @@ function speakBangla(text) {
 connectBtn.addEventListener('click', async () => {
   try {
     device = await navigator.bluetooth.requestDevice({
-      filters: [{ name: 'BanglaRC-Car' }],
-      optionalServices: [SERVICE_UUID]
+    filters: [{
+        services: [SERVICE_UUID]
+    }],
+    optionalServices: [SERVICE_UUID]
     });
     const server = await device.gatt.connect();
+    console.log("Connected");
     const service = await server.getPrimaryService(SERVICE_UUID);
+    console.log("Service Found");
     rxChar = await service.getCharacteristic(CHAR_RX_UUID);
+    console.log("RX OK");
     txChar = await service.getCharacteristic(CHAR_TX_UUID);
+    console.log("TX OK");
 
+    if (!txChar) throw new Error("TX Characteristic Missing");
     await txChar.startNotifications();
     txChar.addEventListener('characteristicvaluechanged', (e) => {
       const text = new TextDecoder().decode(e.target.value);
@@ -84,10 +91,12 @@ connectBtn.addEventListener('click', async () => {
       statusEl.textContent = 'সংযোগ বিচ্ছিন্ন হয়েছে';
       micBtn.disabled = true;
     });
-  } catch (err) {
-    statusEl.textContent = 'সংযোগ ব্যর্থ: ' + err;
+  } catch(err){
     console.error(err);
-  }
+    alert(err.name + "\n\n" + err.message);
+    statusEl.textContent ="Connection Failed";
+
+}
 });
 
 // DEBUG: shows the OS device picker with every nearby BLE device, no name
